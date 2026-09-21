@@ -50,6 +50,8 @@
     background: linear-gradient(90deg, rgb(219,234,254), rgb(37,99,235), rgb(30,27,120)); }
   footer { text-align: center; font-size: 12px; color: var(--sub); padding: 8px 16px 32px; line-height: 1.7; }
   footer a { color: var(--sub); }
+  .warn { margin: 8px 12px 0; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.6;
+    background: #fef3c7; border: 1px solid #f59e0b; color: #78350f; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -58,6 +60,7 @@
   <h1>WDW 待ち時間ログ</h1>
   <div class="updated" id="updated"></div>
 </header>
+<div class="warn" id="warn" role="alert" hidden></div>
 <main>
   <div class="card">
     <label for="park">パーク</label>
@@ -68,8 +71,8 @@
       <option value="hs">Hollywood Studios</option>
       <option value="ak">Animal Kingdom</option>
     </select>
-    <label for="search">名前で検索(英語名)</label>
-    <input type="search" id="search" placeholder="例: Space Mountain" autocomplete="off">
+    <label for="search">名前で検索(日本語・英語)</label>
+    <input type="search" id="search" placeholder="例: スペースマウンテン / space" autocomplete="off">
     <label for="entity">アトラクション</label>
     <select id="entity"></select>
   </div>
@@ -110,6 +113,13 @@ const PARKS = { mk: "Magic Kingdom", epcot: "EPCOT", hs: "Hollywood Studios", ak
 const TYPE_LABEL = { ATTRACTION: "ライド", SHOW: "ショー", GREETING: "グリーティング" };
 const WEEK = ["月", "火", "水", "木", "金", "土", "日"];
 const HOURS = 29;
+const STALE_HOURS = 30; // 最後の記録がこれより古いと警告を出す
+
+// 検索用に表記ゆれをならす(全角半角・大文字小文字・ひらがな/カタカナ・中黒や記号を無視)
+const norm = s => s.normalize("NFKC").toLowerCase()
+  .replace(/[ぁ-ゖ]/g, c => String.fromCharCode(c.charCodeAt(0) + 0x60))
+  .replace(/[\s・'’"“”\-–—:;.,&!?\/()~〜]/g, "");
+const dispName = e => e.ja || e.name;
 
 const $ = id => document.getElementById(id);
 const store = {};        // key -> park json
@@ -135,10 +145,10 @@ function timeLabel(min) {
 
 function refreshEntityList() {
   const park = $("park").value;
-  const q = $("search").value.trim().toLowerCase();
+  const q = norm($("search").value);
   const prev = $("entity").value;
   const list = all.filter(e => (park === "all" || e.key === park) &&
-                               (!q || e.name.toLowerCase().includes(q)));
+                               (!q || e.search.includes(q)));
   const sel = $("entity");
   sel.innerHTML = "";
   if (!list.length) {
@@ -147,7 +157,7 @@ function refreshEntityList() {
     for (const e of list) {
       const o = document.createElement("option");
       o.value = e.key + "|" + e.id;
-      o.textContent = `${e.name}(${TYPE_LABEL[e.type] || e.type}${park === "all" ? "・" + PARKS[e.key] : ""})`;
+      o.textContent = `${dispName(e)} 〔${TYPE_LABEL[e.type] || e.type}${park === "all" ? "・" + PARKS[e.key] : ""}〕`;
       sel.appendChild(o);
     }
     if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
@@ -286,17 +296,37 @@ function stepDate(delta) {
   if (i >= 0 && i < sel.options.length) { sel.selectedIndex = i; renderDay(); }
 }
 
+function showWarning(loadFailed, latestDate, latestText) {
+  const box = $("warn");
+  let text = "";
+  if (loadFailed) {
+    text = "⚠ データを読み込めませんでした。通信状況を確認して、ページを再読み込みしてください。";
+  } else if (latestDate) {
+    const hours = (Date.now() - latestDate.getTime()) / 3600000;
+    if (hours >= STALE_HOURS) {
+      const ago = hours >= 48 ? `${Math.floor(hours / 24)}日` : `${Math.floor(hours)}時間`;
+      text = `⚠ 最後の記録は${ago}前 〔${latestText}〕 です。記録が止まっている可能性があります。` +
+             "パークが休園中でなければ、GitHubの Actions を確認してください。";
+    }
+  }
+  box.textContent = text;
+  box.hidden = !text;
+}
+
 async function init() {
   await Promise.all(Object.keys(PARKS).map(loadPark));
   let latest = "";
   for (const key of Object.keys(PARKS)) {
     const p = store[key];
     if (p.updated > latest) latest = p.updated;
-    for (const e of p.entities) all.push({ key, ...e });
+    for (const e of p.entities) all.push({ key, ...e, search: norm((e.ja || "") + e.name) });
   }
   const failed = Object.keys(PARKS).filter(k => store[k].error);
+  const latestDate = latest ? new Date(latest) : null;
+  const latestText = latestDate ? latestDate.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) + "(日本時間)" : "";
   $("updated").textContent = failed.length === 4 ? "データを読み込めませんでした"
-    : latest ? "最終更新: " + new Date(latest).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) + "(日本時間)" : "";
+    : latestDate ? "最後の記録: " + latestText : "";
+  showWarning(failed.length === 4, latestDate, latestText);
   $("park").addEventListener("change", refreshEntityList);
   $("search").addEventListener("input", refreshEntityList);
   $("entity").addEventListener("change", () => { refreshDates(); renderHeat(); });
