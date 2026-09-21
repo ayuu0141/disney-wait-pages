@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WDW 待ち時間ログ</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1f2937; --sub: #6b7280; --line: #e5e7eb;
+    --accent: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif; }
+  header { padding: 14px 16px 6px; }
+  h1 { font-size: 18px; margin: 0; }
+  .updated { font-size: 12px; color: var(--sub); margin-top: 2px; }
+  main { padding: 0 12px 24px; max-width: 640px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; margin-top: 10px; }
+  label { display: block; font-size: 12px; color: var(--sub); margin: 8px 0 3px; }
+  label:first-child { margin-top: 0; }
+  select, input[type=search] { width: 100%; font-size: 16px; padding: 9px 10px;
+    border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: var(--text); }
+  .tabs { display: flex; gap: 6px; margin-top: 10px; }
+  .tabs button { flex: 1; font-size: 15px; padding: 10px 4px; border: 1px solid #cbd5e1;
+    background: #fff; border-radius: 8px; color: var(--text); }
+  .tabs button[aria-selected=true] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .daterow { display: flex; gap: 6px; }
+  .daterow select { flex: 1; }
+  .daterow button { width: 44px; font-size: 16px; border: 1px solid #cbd5e1; background: #fff;
+    border-radius: 8px; color: var(--text); }
+  .chartbox { position: relative; height: 300px; margin-top: 10px; }
+  .note { font-size: 12px; color: var(--sub); margin: 8px 0 0; line-height: 1.5; }
+  .msg { text-align: center; color: var(--sub); padding: 28px 8px; font-size: 14px; line-height: 1.6; }
+  table.heat { width: 100%; border-collapse: separate; border-spacing: 2px; table-layout: fixed;
+    margin-top: 10px; }
+  .heat th { font-size: 11px; font-weight: 500; color: var(--sub); padding: 2px 0; }
+  .heat th.h { width: 44px; text-align: right; padding-right: 4px; }
+  .heat td { text-align: center; padding: 4px 0; border-radius: 4px; height: 38px;
+    font-variant-numeric: tabular-nums; cursor: pointer; }
+  .heat td .v { font-size: 14px; font-weight: 600; line-height: 1.1; }
+  .heat td .n { font-size: 9px; opacity: .8; line-height: 1.1; }
+  .heat td.sel { outline: 2px solid var(--text); }
+  .heat td.empty { background: #f1f5f9; color: #94a3b8; cursor: default; }
+  .info { margin-top: 8px; padding: 8px 10px; background: #f1f5f9; border-radius: 8px;
+    font-size: 14px; min-height: 36px; }
+  .legend { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--sub); margin-top: 8px; }
+  .legend .bar { flex: 1; height: 8px; border-radius: 4px;
+    background: linear-gradient(90deg, rgb(219,234,254), rgb(37,99,235), rgb(30,27,120)); }
+  footer { text-align: center; font-size: 12px; color: var(--sub); padding: 8px 16px 32px; line-height: 1.7; }
+  footer a { color: var(--sub); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>WDW 待ち時間ログ</h1>
+  <div class="updated" id="updated"></div>
+</header>
+<main>
+  <div class="card">
+    <label for="park">パーク</label>
+    <select id="park">
+      <option value="all">すべてのパーク</option>
+      <option value="mk">Magic Kingdom</option>
+      <option value="epcot">EPCOT</option>
+      <option value="hs">Hollywood Studios</option>
+      <option value="ak">Animal Kingdom</option>
+    </select>
+    <label for="search">名前で検索(英語名)</label>
+    <input type="search" id="search" placeholder="例: Space Mountain" autocomplete="off">
+    <label for="entity">アトラクション</label>
+    <select id="entity"></select>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tab-day" aria-selected="true">1日の推移</button>
+    <button role="tab" id="tab-heat" aria-selected="false">曜日×時間帯の平均</button>
+  </div>
+
+  <section class="card" id="view-day">
+    <label for="date">日付</label>
+    <div class="daterow">
+      <button id="prev" aria-label="前の日">◀</button>
+      <select id="date"></select>
+      <button id="next" aria-label="次の日">▶</button>
+    </div>
+    <div class="chartbox"><canvas id="chart"></canvas></div>
+    <p class="note">横軸はフロリダ現地時間。線が途切れている所は休止中(DOWN)です。深夜0時以降は24時台、25時台と表示します。</p>
+    <div class="msg" id="day-msg" hidden></div>
+  </section>
+
+  <section class="card" id="view-heat" hidden>
+    <div id="heat-wrap"></div>
+    <div class="info" id="heat-info">マスをタップすると、平均と件数を表示します。</div>
+    <div class="legend"><span>0分</span><div class="bar"></div><span>90分以上</span></div>
+    <p class="note">各マスの上が平均待ち時間(分)、下の小さい数字が集計に使った記録の件数です。件数が少ないマスは参考程度にしてください。営業中(OPERATING)の記録だけで計算しています。</p>
+    <div class="msg" id="heat-msg" hidden></div>
+  </section>
+</main>
+<footer>
+  <div>Powered by <a href="https://themeparks.wiki" target="_blank" rel="noopener">ThemeParks.wiki</a></div>
+  <div>個人の分析用ページです。ディズニーやThemeParks.wikiの公式ページではありません。<br>待ち時間は推定値で、実際と異なる場合があります。</div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+const PARKS = { mk: "Magic Kingdom", epcot: "EPCOT", hs: "Hollywood Studios", ak: "Animal Kingdom" };
+const TYPE_LABEL = { ATTRACTION: "ライド", SHOW: "ショー", GREETING: "グリーティング" };
+const WEEK = ["月", "火", "水", "木", "金", "土", "日"];
+const HOURS = 29;
+
+const $ = id => document.getElementById(id);
+const store = {};        // key -> park json
+let all = [];            // 読み込み済みの全アトラクション {key, ...}
+let chart = null;
+let selectedCell = null;
+
+async function loadPark(key) {
+  try {
+    const res = await fetch(`data/${key}.json`, { cache: "no-cache" });
+    if (!res.ok) throw new Error(res.status);
+    store[key] = await res.json();
+  } catch (e) {
+    store[key] = { park: PARKS[key], updated: "", entities: [], error: true };
+  }
+}
+
+function hourLabel(h) { return h >= 24 ? `${h - 24}時(翌)` : `${h}時`; }
+function timeLabel(min) {
+  const h = Math.floor(min / 60), m = min % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function refreshEntityList() {
+  const park = $("park").value;
+  const q = $("search").value.trim().toLowerCase();
+  const prev = $("entity").value;
+  const list = all.filter(e => (park === "all" || e.key === park) &&
+                               (!q || e.name.toLowerCase().includes(q)));
+  const sel = $("entity");
+  sel.innerHTML = "";
+  if (!list.length) {
+    sel.innerHTML = '<option value="">(該当なし)</option>';
+  } else {
+    for (const e of list) {
+      const o = document.createElement("option");
+      o.value = e.key + "|" + e.id;
+      o.textContent = `${e.name}(${TYPE_LABEL[e.type] || e.type}${park === "all" ? "・" + PARKS[e.key] : ""})`;
+      sel.appendChild(o);
+    }
+    if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+  }
+  refreshDates();
+  renderHeat();
+}
+
+function currentEntity() {
+  const v = $("entity").value;
+  if (!v) return null;
+  const [key, id] = v.split("|");
+  return all.find(e => e.key === key && e.id === id) || null;
+}
+
+function refreshDates() {
+  const e = currentEntity();
+  const sel = $("date");
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const dates = e ? Object.keys(e.days).sort().reverse() : [];
+  for (const d of dates) {
+    const o = document.createElement("option");
+    const dt = new Date(d + "T00:00:00");
+    o.value = d;
+    o.textContent = `${d.replace(/-/g, "/")}(${WEEK[(dt.getDay() + 6) % 7]})`;
+    sel.appendChild(o);
+  }
+  if (dates.includes(prev)) sel.value = prev;
+  renderDay();
+}
+
+function renderDay() {
+  const e = currentEntity();
+  const d = $("date").value;
+  const msg = $("day-msg");
+  const box = document.querySelector(".chartbox");
+  if (chart) { chart.destroy(); chart = null; }
+  if (!e || !d) {
+    box.hidden = true;
+    msg.hidden = false;
+    msg.textContent = all.length ? "表示できるデータがありません。" : "まだデータがありません。記録が始まると表示されます。";
+    return;
+  }
+  box.hidden = false; msg.hidden = true;
+  const pts = e.days[d].slice().sort((a, b) => a[0] - b[0]).map(([x, y]) => ({ x, y }));
+  const xs = pts.map(p => p.x);
+  const xmin = Math.floor(Math.min(...xs) / 60) * 60;
+  const xmax = Math.ceil(Math.max(...xs) / 60) * 60;
+  chart = new Chart($("chart"), {
+    type: "line",
+    data: { datasets: [{ data: pts, borderColor: "#2563eb", backgroundColor: "#2563eb",
+      pointRadius: 3, borderWidth: 2, tension: 0, spanGaps: false }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      parsing: false,
+      scales: {
+        x: { type: "linear", min: xmin, max: Math.max(xmax, xmin + 60),
+          ticks: { stepSize: 60, callback: v => timeLabel(v).slice(0, 2) + "時", maxRotation: 0 },
+          grid: { color: "#eef0f3" } },
+        y: { beginAtZero: true, title: { display: true, text: "待ち時間(分)" }, grid: { color: "#eef0f3" } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          title: items => timeLabel(items[0].parsed.x),
+          label: item => `${item.parsed.y}分`,
+        } },
+      },
+    },
+  });
+}
+
+function heatColor(v) {
+  const t = Math.min(v / 90, 1);
+  const a = [219, 234, 254], b = [37, 99, 235], c = [30, 27, 120];
+  const mix = (p, q, u) => p.map((x, i) => Math.round(x + (q[i] - x) * u));
+  const rgb = t < 0.6 ? mix(a, b, t / 0.6) : mix(b, c, (t - 0.6) / 0.4);
+  const lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+  return { bg: `rgb(${rgb.join(",")})`, fg: lum < 150 ? "#fff" : "#0f172a" };
+}
+
+function renderHeat() {
+  const e = currentEntity();
+  const wrap = $("heat-wrap"), msg = $("heat-msg"), info = $("heat-info");
+  wrap.innerHTML = "";
+  selectedCell = null;
+  info.textContent = "マスをタップすると、平均と件数を表示します。";
+  if (!e || !e.counts.some(c => c > 0)) {
+    msg.hidden = false;
+    msg.textContent = all.length ? "表示できるデータがありません。" : "まだデータがありません。記録が始まると表示されます。";
+    return;
+  }
+  msg.hidden = true;
+  let hMin = HOURS, hMax = 0;
+  for (let w = 0; w < 7; w++) for (let h = 0; h < HOURS; h++)
+    if (e.counts[w * HOURS + h] > 0) { hMin = Math.min(hMin, h); hMax = Math.max(hMax, h); }
+  const table = document.createElement("table");
+  table.className = "heat";
+  let html = "<thead><tr><th class='h'></th>" + WEEK.map(w => `<th>${w}</th>`).join("") + "</tr></thead><tbody>";
+  for (let h = hMin; h <= hMax; h++) {
+    html += `<tr><th class="h">${hourLabel(h)}</th>`;
+    for (let w = 0; w < 7; w++) {
+      const i = w * HOURS + h, n = e.counts[i];
+      if (!n) { html += '<td class="empty">–</td>'; continue; }
+      const avg = e.sums[i] / n, c = heatColor(avg);
+      html += `<td data-w="${w}" data-h="${h}" style="background:${c.bg};color:${c.fg}">` +
+              `<div class="v">${Math.round(avg)}</div><div class="n">n=${n}</div></td>`;
+    }
+    html += "</tr>";
+  }
+  table.innerHTML = html + "</tbody>";
+  table.addEventListener("click", ev => {
+    const td = ev.target.closest("td[data-w]");
+    if (!td) return;
+    if (selectedCell) selectedCell.classList.remove("sel");
+    selectedCell = td; td.classList.add("sel");
+    const w = +td.dataset.w, h = +td.dataset.h, i = w * HOURS + h;
+    info.textContent = `${WEEK[w]}曜 ${hourLabel(h)}台:平均 ${(e.sums[i] / e.counts[i]).toFixed(1)}分(${e.counts[i]}件)`;
+  });
+  wrap.appendChild(table);
+}
+
+function showTab(name) {
+  const day = name === "day";
+  $("tab-day").setAttribute("aria-selected", day);
+  $("tab-heat").setAttribute("aria-selected", !day);
+  $("view-day").hidden = !day;
+  $("view-heat").hidden = day;
+  if (day && chart) chart.resize();
+}
+
+function stepDate(delta) {
+  const sel = $("date");
+  const i = sel.selectedIndex - delta; // 一覧は新しい順
+  if (i >= 0 && i < sel.options.length) { sel.selectedIndex = i; renderDay(); }
+}
+
+async function init() {
+  await Promise.all(Object.keys(PARKS).map(loadPark));
+  let latest = "";
+  for (const key of Object.keys(PARKS)) {
+    const p = store[key];
+    if (p.updated > latest) latest = p.updated;
+    for (const e of p.entities) all.push({ key, ...e });
+  }
+  const failed = Object.keys(PARKS).filter(k => store[k].error);
+  $("updated").textContent = failed.length === 4 ? "データを読み込めませんでした"
+    : latest ? "最終更新: " + new Date(latest).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) + "(日本時間)" : "";
+  $("park").addEventListener("change", refreshEntityList);
+  $("search").addEventListener("input", refreshEntityList);
+  $("entity").addEventListener("change", () => { refreshDates(); renderHeat(); });
+  $("date").addEventListener("change", renderDay);
+  $("prev").addEventListener("click", () => stepDate(-1));
+  $("next").addEventListener("click", () => stepDate(1));
+  $("tab-day").addEventListener("click", () => showTab("day"));
+  $("tab-heat").addEventListener("click", () => showTab("heat"));
+  refreshEntityList();
+}
+init();
+</script>
+</body>
+</html>
